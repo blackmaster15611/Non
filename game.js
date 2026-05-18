@@ -136,7 +136,7 @@ function spawnEnemy(x, z, type) {
         enemy.health = 30;
         enemy.maxHealth = 30;
         enemy.speed = 0.15;
-        enemy.damage = 10;
+        enemy.damage = 0; // DISABLED - Enemies don't damage player
         enemy.points = 10;
         enemy.mesh.material = new BABYLON.StandardMaterial('goblinMat', scene);
         enemy.mesh.material.diffuse = new BABYLON.Color3(0.2, 0.8, 0.2);
@@ -145,7 +145,7 @@ function spawnEnemy(x, z, type) {
         enemy.health = 60;
         enemy.maxHealth = 60;
         enemy.speed = 0.08;
-        enemy.damage = 20;
+        enemy.damage = 0; // DISABLED - Enemies don't damage player
         enemy.points = 30;
         enemy.mesh.material = new BABYLON.StandardMaterial('trollMat', scene);
         enemy.mesh.material.diffuse = new BABYLON.Color3(0.7, 0.5, 0.2);
@@ -154,7 +154,7 @@ function spawnEnemy(x, z, type) {
         enemy.health = 80;
         enemy.maxHealth = 80;
         enemy.speed = 0.1;
-        enemy.damage = 30;
+        enemy.damage = 0; // DISABLED - Enemies don't damage player
         enemy.points = 50;
         enemy.mesh.material = new BABYLON.StandardMaterial('cyclopsMat', scene);
         enemy.mesh.material.diffuse = new BABYLON.Color3(1, 0.2, 0.2);
@@ -223,13 +223,8 @@ function updateGame() {
         const distance = BABYLON.Vector3.Distance(enemy.mesh.position, camera.position);
         const now = Date.now();
         
-        if (distance < 3) {
-            if (now - enemy.lastAttackTime > enemy.attackCooldown) {
-                playerHealth -= enemy.damage;
-                enemy.lastAttackTime = now;
-                updateHealth();
-            }
-        }
+        // DISABLED: Enemy attacks removed
+        // Enemies still move but don't damage you anymore
         
         // Remove if too far
         if (distance > 100) {
@@ -237,10 +232,8 @@ function updateGame() {
         }
     });
     
-    // Check game over
-    if (playerHealth <= 0) {
-        gameOver();
-    }
+    // Game never ends now (unless you want to end it manually)
+    // Removed: if (playerHealth <= 0) { gameOver(); }
 }
 
 function updateScore() {
