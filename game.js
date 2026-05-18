@@ -1,246 +1,310 @@
-// Game Setup
-const canvas = document.getElementById("gameCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+// Game variables
+let scene, camera, engine, player, enemies = [], projectiles = [];
+let playerHealth = 100, maxHealth = 100;
+let score = 0;
+let gameOverFlag = false;
+let lastAttackTime = 0;
+let attackCooldown = 300; // milliseconds
 
-// Game Variables
-let scene, camera, light;
-let player = { position: new BABYLON.Vector3(0, 1, 0), health: 100, maxHealth: 100, score: 0, speed: 0.25 };
-let enemies = [];
-let keys = {};
-let isAttacking = false;
-let gameOver = false;
-
-// Enemy Types
-const enemyTypes = {
-    goblin: { color: BABYLON.Color3.Green(), health: 30, speed: 0.15, damage: 5, scale: 0.8, points: 10 },
-    troll: { color: BABYLON.Color3.FromHexString("#8B4513"), health: 60, speed: 0.1, damage: 15, scale: 1.2, points: 30 },
-    cyclops: { color: BABYLON.Color3.Red(), health: 80, speed: 0.08, damage: 20, scale: 1.5, points: 50 }
+// Mobile controls
+const mobileKeys = {
+    w: false,
+    a: false,
+    s: false,
+    d: false
 };
 
-// Initialize Scene
-function createScene() {
-    scene = new BABYLON.Scene(engine);
-    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
-    scene.collisionsEnabled = true;
+// Initialize game
+function initGame() {
+    const canvas = document.getElementById('gameCanvas');
+    engine = new BABYLON.Engine(canvas, true);
     
-    // Camera
-    camera = new BABYLON.UniversalCamera("camera", player.position.add(new BABYLON.Vector3(0, 2, -5)));
+    // Create scene
+    scene = new BABYLON.Scene(engine);
+    scene.collisionsEnabled = true;
+    scene.gravity = new BABYLON.Vector3(0, -0.9, 0);
+    
+    // Create camera (first person view)
+    camera = new BABYLON.UniversalCamera('camera', new BABYLON.Vector3(0, 2, 0));
     camera.attachControl(canvas, true);
-    camera.speed = 0;
-    camera.inertia = 0.7;
+    camera.speed = 0.3;
     camera.angularSensibility = 1000;
+    camera.inertia = 0.7;
     camera.checkCollisions = true;
-    camera.collisionRadius = new BABYLON.Vector3(0.2, 0.9, 0.2);
+    camera.collisionRadius = new BABYLON.Vector3(0.5, 0.5, 0.5);
     
     // Lighting
-    light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
-    light.intensity = 0.9;
+    const light1 = new BABYLON.HemisphericLight('light1', new BABYLON.Vector3(1, 1, 0));
+    light1.intensity = 0.7;
     
-    const sunLight = new BABYLON.PointLight("sunLight", new BABYLON.Vector3(0, 20, 0), scene);
-    sunLight.intensity = 0.5;
+    const light2 = new BABYLON.PointLight('light2', new BABYLON.Vector3(0, 5, 0));
+    light2.intensity = 0.8;
+    light2.range = 50;
     
-    // Ground
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
-    const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-    groundMat.diffuse = new BABYLON.Color3.Green();
-    groundMat.specularColor = new BABYLON.Color3.Black();
-    ground.material = groundMat;
+    // Create ground
+    const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 200, height: 200 }, scene);
+    const groundMaterial = new BABYLON.StandardMaterial('groundMat', scene);
+    groundMaterial.diffuse = new BABYLON.Color3(0.2, 0.8, 0.2);
+    ground.material = groundMaterial;
     ground.checkCollisions = true;
     
-    // Sky
-    const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 500.0 }, scene);
-    const skyboxMat = new BABYLON.StandardMaterial("skyBox", scene);
-    skyboxMat.backFaceCulling = false;
-    skyboxMat.emissiveColor = new BABYLON.Color3.FromHexString("#87CEEB");
-    skybox.material = skyboxMat;
+    // Create sky
+    const sky = BABYLON.MeshBuilder.CreateBox('sky', { size: 500 }, scene);
+    const skyMaterial = new BABYLON.StandardMaterial('skyMat', scene);
+    skyMaterial.emissiveColor = new BABYLON.Color3(0.5, 0.7, 1);
+    sky.material = skyMaterial;
     
-    return scene;
+    // Create some obstacles
+    createObstacles();
+    
+    // Spawn initial enemies
+    spawnEnemy(10, 5, 'goblin');
+    spawnEnemy(-15, 8, 'troll');
+    spawnEnemy(0, 10, 'cyclops');
+    
+    // Setup mobile controls
+    setupMobileControls();
+    
+    // Mouse click for attack
+    window.addEventListener('click', () => {
+        if (!gameOverFlag) attack();
+    });
+    
+    // Keyboard input
+    scene.onKeyboardObservable.add((kbInfo) => {
+        const key = kbInfo.event.key.toLowerCase();
+        if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
+            if (key === 'w') camera.position.z -= 0.3;
+            if (key === 'a') camera.position.x -= 0.3;
+            if (key === 's') camera.position.z += 0.3;
+            if (key === 'd') camera.position.x += 0.3;
+            if (key === ' ') {
+                if (!gameOverFlag) attack();
+            }
+        }
+    });
+    
+    // Game loop
+    engine.runRenderLoop(() => {
+        updateGame();
+        scene.render();
+    });
+    
+    window.addEventListener('resize', () => {
+        engine.resize();
+    });
 }
 
-// Create Enemy
-function createEnemy(type) {
-    const enemyData = enemyTypes[type];
-    const enemy = {
+function createObstacles() {
+    const positions = [
+        { x: 20, z: 20 },
+        { x: -20, z: 20 },
+        { x: 20, z: -20 },
+        { x: -20, z: -20 },
+        { x: 0, z: 30 },
+        { x: 30, z: 0 }
+    ];
+    
+    positions.forEach(pos => {
+        const obstacle = BABYLON.MeshBuilder.CreateBox('obstacle', { size: 5 }, scene);
+        obstacle.position = new BABYLON.Vector3(pos.x, 2.5, pos.z);
+        const obstacleMat = new BABYLON.StandardMaterial('obstacleMat', scene);
+        obstacleMat.diffuse = new BABYLON.Color3(0.6, 0.6, 0.6);
+        obstacle.material = obstacleMat;
+        obstacle.checkCollisions = true;
+    });
+}
+
+function spawnEnemy(x, z, type) {
+    if (enemies.length > 15) return; // Limit enemies
+    
+    let enemy = {
+        mesh: BABYLON.MeshBuilder.CreateBox(`enemy_${enemies.length}`, { size: 1 }, scene),
+        position: new BABYLON.Vector3(x, 1, z),
         type: type,
-        mesh: BABYLON.MeshBuilder.CreateBox(type + Math.random(), { size: 1 }, scene),
-        health: enemyData.health,
-        maxHealth: enemyData.health,
-        speed: enemyData.speed,
-        damage: enemyData.damage,
-        points: enemyData.points,
-        attackCooldown: 0
+        health: 0,
+        maxHealth: 0,
+        speed: 0,
+        damage: 0,
+        points: 0,
+        lastAttackTime: 0,
+        attackCooldown: 1000
     };
     
-    enemy.mesh.scaling = new BABYLON.Vector3(enemyData.scale, enemyData.scale * 1.3, enemyData.scale);
-    enemy.mesh.position = new BABYLON.Vector3(
-        (Math.random() - 0.5) * 80 + player.position.x,
-        2,
-        (Math.random() - 0.5) * 80 + player.position.z
-    );
+    // Set type-specific properties
+    if (type === 'goblin') {
+        enemy.health = 30;
+        enemy.maxHealth = 30;
+        enemy.speed = 0.15;
+        enemy.damage = 10;
+        enemy.points = 10;
+        enemy.mesh.material = new BABYLON.StandardMaterial('goblinMat', scene);
+        enemy.mesh.material.diffuse = new BABYLON.Color3(0.2, 0.8, 0.2);
+        enemy.mesh.scaling = new BABYLON.Vector3(0.6, 0.8, 0.6);
+    } else if (type === 'troll') {
+        enemy.health = 60;
+        enemy.maxHealth = 60;
+        enemy.speed = 0.08;
+        enemy.damage = 20;
+        enemy.points = 30;
+        enemy.mesh.material = new BABYLON.StandardMaterial('trollMat', scene);
+        enemy.mesh.material.diffuse = new BABYLON.Color3(0.7, 0.5, 0.2);
+        enemy.mesh.scaling = new BABYLON.Vector3(1.5, 1.5, 1.5);
+    } else if (type === 'cyclops') {
+        enemy.health = 80;
+        enemy.maxHealth = 80;
+        enemy.speed = 0.1;
+        enemy.damage = 30;
+        enemy.points = 50;
+        enemy.mesh.material = new BABYLON.StandardMaterial('cyclopsMat', scene);
+        enemy.mesh.material.diffuse = new BABYLON.Color3(1, 0.2, 0.2);
+        enemy.mesh.scaling = new BABYLON.Vector3(2, 2, 2);
+    }
     
-    const mat = new BABYLON.StandardMaterial("enemyMat" + Math.random(), scene);
-    mat.diffuse = enemyData.color;
-    mat.specularColor = new BABYLON.Color3.Black();
-    enemy.mesh.material = mat;
+    enemy.mesh.position = enemy.position;
     enemy.mesh.checkCollisions = true;
-    
-    // Physics
-    enemy.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-        enemy.mesh,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 1, restitution: 0.2, friction: 1 },
-        scene
-    );
-    
     enemies.push(enemy);
-    return enemy;
 }
 
-// Update Player Camera
-function updateCamera() {
-    const forward = BABYLON.Vector3.Forward();
-    const right = BABYLON.Vector3.Right();
-    const speed = player.speed;
-    
-    if (keys['w'] || keys['W']) player.position.addInPlace(forward.scale(speed));
-    if (keys['s'] || keys['S']) player.position.addInPlace(forward.scale(-speed));
-    if (keys['a'] || keys['A']) player.position.addInPlace(right.scale(-speed));
-    if (keys['d'] || keys['D']) player.position.addInPlace(right.scale(speed));
-    
-    camera.position = player.position.add(new BABYLON.Vector3(0, 2, -5));
-}
-
-// Attack
 function attack() {
-    if (isAttacking || gameOver) return;
-    isAttacking = true;
+    const now = Date.now();
+    if (now - lastAttackTime < attackCooldown) return;
+    lastAttackTime = now;
     
+    // Check enemies in front of camera
     const attackRange = 15;
-    const attackDamage = 25;
+    const cameraDirection = BABYLON.Vector3.Forward();
+    const rotationMatrix = BABYLON.Matrix.RotationYawPitchRoll(camera.rotation.y, camera.rotation.x, camera.rotation.z);
+    cameraDirection.applyInPlace(rotationMatrix);
+    
+    const attackOrigin = camera.position.add(cameraDirection.scale(2));
     
     enemies.forEach(enemy => {
-        const distance = BABYLON.Vector3.Distance(player.position, enemy.mesh.position);
+        const distance = BABYLON.Vector3.Distance(attackOrigin, enemy.mesh.position);
         if (distance < attackRange) {
-            enemy.health -= attackDamage;
-            if (enemy.health <= 0) {
-                player.score += enemy.points;
-                enemy.mesh.dispose();
-                enemies = enemies.filter(e => e !== enemy);
+            const enemyDirection = enemy.mesh.position.subtract(attackOrigin);
+            const angle = BABYLON.Vector3.Dot(cameraDirection, enemyDirection.normalize());
+            
+            if (angle > 0.5) { // Check if in front
+                enemy.health -= 25;
+                if (enemy.health <= 0) {
+                    score += enemy.points;
+                    updateScore();
+                    removeEnemy(enemies.indexOf(enemy));
+                    
+                    // Spawn new enemy
+                    const randomX = (Math.random() - 0.5) * 60;
+                    const randomZ = (Math.random() - 0.5) * 60 + 20;
+                    const randomType = ['goblin', 'troll', 'cyclops'][Math.floor(Math.random() * 3)];
+                    spawnEnemy(randomX, randomZ, randomType);
+                }
             }
         }
     });
-    
-    setTimeout(() => { isAttacking = false; }, 500);
 }
 
-// Enemy AI
-function updateEnemies() {
+function removeEnemy(index) {
+    if (enemies[index]) {
+        enemies[index].mesh.dispose();
+        enemies.splice(index, 1);
+    }
+}
+
+function updateGame() {
+    if (gameOverFlag) return;
+    
+    // Update enemies
     enemies.forEach(enemy => {
-        const distance = BABYLON.Vector3.Distance(player.position, enemy.mesh.position);
-        const direction = player.position.subtract(enemy.mesh.position).normalize();
+        // Move towards camera
+        const direction = camera.position.subtract(enemy.mesh.position).normalize();
+        enemy.mesh.position.addInPlace(direction.scale(enemy.speed));
         
-        if (distance > 1.5) {
-            enemy.mesh.physicsImpostor.applyForce(
-                direction.scale(enemy.speed * 100),
-                enemy.mesh.getAbsolutePosition()
-            );
-        } else if (enemy.attackCooldown <= 0) {
-            player.health -= enemy.damage;
-            enemy.attackCooldown = 60;
-            if (player.health <= 0) {
-                gameOver = true;
-                showGameOver();
+        // Check distance to camera for attack
+        const distance = BABYLON.Vector3.Distance(enemy.mesh.position, camera.position);
+        const now = Date.now();
+        
+        if (distance < 3) {
+            if (now - enemy.lastAttackTime > enemy.attackCooldown) {
+                playerHealth -= enemy.damage;
+                enemy.lastAttackTime = now;
+                updateHealth();
             }
         }
         
-        if (enemy.attackCooldown > 0) enemy.attackCooldown--;
-    });
-}
-
-// Spawn Enemies
-function spawnEnemies() {
-    if (gameOver) return;
-    
-    const types = Object.keys(enemyTypes);
-    const randomType = types[Math.floor(Math.random() * types.length)];
-    
-    createEnemy(randomType);
-    
-    if (enemies.length < 3 + Math.floor(player.score / 100)) {
-        setTimeout(spawnEnemies, 3000);
-    } else {
-        setTimeout(spawnEnemies, 5000);
-    }
-}
-
-// Update UI
-function updateUI() {
-    document.getElementById("score").textContent = "Score: " + player.score;
-    document.getElementById("health").textContent = "Health: " + Math.ceil(player.health);
-    const healthPercent = (player.health / player.maxHealth) * 100;
-    document.getElementById("healthFill").style.width = healthPercent + "%";
-}
-
-// Show Game Over
-function showGameOver() {
-    document.getElementById("gameOverScore").textContent = "Final Score: " + player.score;
-    document.getElementById("gameOver").style.display = "block";
-}
-
-// Restart Game
-function restartGame() {
-    location.reload();
-}
-
-// Mobile Controls
-function setupMobileControls() {
-    document.getElementById("upBtn").addEventListener("touchstart", () => { keys['w'] = true; });
-    document.getElementById("upBtn").addEventListener("touchend", () => { keys['w'] = false; });
-    
-    document.getElementById("downBtn").addEventListener("touchstart", () => { keys['s'] = true; });
-    document.getElementById("downBtn").addEventListener("touchend", () => { keys['s'] = false; });
-    
-    document.getElementById("leftBtn").addEventListener("touchstart", () => { keys['a'] = true; });
-    document.getElementById("leftBtn").addEventListener("touchend", () => { keys['a'] = false; });
-    
-    document.getElementById("rightBtn").addEventListener("touchstart", () => { keys['d'] = true; });
-    document.getElementById("rightBtn").addEventListener("touchend", () => { keys['d'] = false; });
-    
-    document.getElementById("attackBtn").addEventListener("touchstart", (e) => { e.preventDefault(); attack(); });
-}
-
-// Keyboard Controls
-window.addEventListener("keydown", (e) => { keys[e.key] = true; });
-window.addEventListener("keyup", (e) => { keys[e.key] = false; });
-
-// Mouse Click to Attack
-window.addEventListener("click", attack);
-
-// Restart Button
-document.getElementById("restartBtn").addEventListener("click", restartGame);
-
-// Setup Game
-createScene();
-setupMobileControls();
-spawnEnemies();
-
-// Game Loop
-engine.runRenderLoop(() => {
-    if (!gameOver) {
-        updateCamera();
-        updateEnemies();
-        
-        // Regenerate health slowly
-        if (player.health < player.maxHealth) {
-            player.health += 0.01;
+        // Remove if too far
+        if (distance > 100) {
+            removeEnemy(enemies.indexOf(enemy));
         }
-    }
+    });
     
-    updateUI();
-    scene.render();
-});
+    // Check game over
+    if (playerHealth <= 0) {
+        gameOver();
+    }
+}
 
-// Resize
-window.addEventListener("resize", () => {
-    engine.resize();
-});
+function updateScore() {
+    document.getElementById('score').textContent = `Score: ${score}`;
+}
+
+function updateHealth() {
+    const healthPercent = (playerHealth / maxHealth) * 100;
+    document.getElementById('healthFill').style.width = healthPercent + '%';
+    document.getElementById('health').textContent = `Health: ${playerHealth}/${maxHealth}`;
+}
+
+function gameOver() {
+    gameOverFlag = true;
+    document.getElementById('gameOverScore').textContent = `Final Score: ${score}`;
+    document.getElementById('gameOver').style.display = 'block';
+}
+
+function restartGame() {
+    // Reset variables
+    playerHealth = maxHealth;
+    score = 0;
+    gameOverFlag = false;
+    lastAttackTime = 0;
+    
+    // Remove all enemies
+    enemies.forEach(enemy => enemy.mesh.dispose());
+    enemies = [];
+    
+    // Reset camera
+    camera.position = new BABYLON.Vector3(0, 2, 0);
+    camera.rotation = BABYLON.Vector3.Zero();
+    
+    // Hide game over screen
+    document.getElementById('gameOver').style.display = 'none';
+    
+    // Update UI
+    updateScore();
+    updateHealth();
+    
+    // Spawn new enemies
+    spawnEnemy(10, 5, 'goblin');
+    spawnEnemy(-15, 8, 'troll');
+    spawnEnemy(0, 10, 'cyclops');
+}
+
+function setupMobileControls() {
+    const upBtn = document.getElementById('upBtn');
+    const downBtn = document.getElementById('downBtn');
+    const leftBtn = document.getElementById('leftBtn');
+    const rightBtn = document.getElementById('rightBtn');
+    const attackBtn = document.getElementById('attackBtn');
+    
+    const moveDistance = 0.5;
+    
+    upBtn.addEventListener('touchstart', (e) => { e.preventDefault(); camera.position.z -= moveDistance; });
+    downBtn.addEventListener('touchstart', (e) => { e.preventDefault(); camera.position.z += moveDistance; });
+    leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); camera.position.x -= moveDistance; });
+    rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); camera.position.x += moveDistance; });
+    attackBtn.addEventListener('touchstart', (e) => { e.preventDefault(); attack(); });
+}
+
+// Restart button
+document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+// Initialize on load
+window.addEventListener('load', initGame);
